@@ -42,6 +42,12 @@ data class RoomTrack(
     val album: String = "",
     val durationMs: Long = 0L,
     val thumbnail: String = "",
+    /**
+     * Who put this track in the room queue — "added by Priya" is the social glue of a jam.
+     * The wire has always carried it (`TrackInfo.suggestedBy`, proto field 7); the domain
+     * boundary used to drop it, so queue rows could never say who added what.
+     */
+    val suggestedBy: String = "",
 )
 
 data class RoomSuggestion(

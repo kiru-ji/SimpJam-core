@@ -5,6 +5,7 @@ import com.maxrave.domain.data.model.browse.album.Track
 import com.maxrave.domain.data.model.listentogether.RoomTrack
 import com.maxrave.domain.data.player.GenericMediaItem
 import com.maxrave.domain.data.player.GenericMediaMetadata
+import com.maxrave.domain.data.player.GenericPlaybackParameters
 import com.maxrave.domain.mediaservice.handler.MediaPlayerHandler
 import com.maxrave.domain.mediaservice.handler.QueueData
 import com.maxrave.domain.mediaservice.handler.SimpleMediaState
@@ -97,6 +98,61 @@ class ListenTogetherPlaybackBridge(
         scope.launch { publishPlayPauseAsHost() }
         scope.launch { publishSeeksAsHost() }
         scope.launch { answerBufferBarrier() }
+        scope.launch { runDriftCorrection() }
+    }
+
+    /**
+     * Sub-threshold drift correction, the way Metrolist's room manager does it.
+     *
+     * [applyTransport] only reacts when the room publishes a command, and only with a hard seek
+     * once drift exceeds [SEEK_TOLERANCE_MS] — between commands a guest can slide a few hundred
+     * milliseconds off the host with nothing pulling it back. This loop samples the room's target
+     * position against the local playhead while a guest is playing and nudges playback speed by up
+     * to ±[DRIFT_NUDGE_MAX] (2%): fast enough to close a few hundred ms within seconds, far too
+     * small to hear. Drift inside [DRIFT_SOFT_MS] is left alone — chasing it would wobble the rate
+     * constantly for no gain. A hard gap above [SEEK_TOLERANCE_MS] is left to the next transport
+     * command's seek, so the two mechanisms never fight over the playhead at the same moment.
+     *
+     * The user's own speed choice is preserved: the first time the loop nudges, it snapshots the
+     * current [GenericPlaybackParameters] and restores it exactly when drift is back under the soft
+     * threshold, on pause, or on leaving the room.
+     */
+    private suspend fun runDriftCorrection() {
+        var baseParams: GenericPlaybackParameters? = null
+        while (true) {
+            delay(DRIFT_TICK_MS)
+            val room = repository.room.value
+            if (!(room.inRoom && !room.isHost && room.isPlaying && !applyingRemote)) {
+                baseParams?.let { handler.player.playbackParameters = it }
+                baseParams = null
+                continue
+            }
+            val trackId = room.currentTrack?.id
+            if (trackId.isNullOrBlank() || trackId != lastAppliedTrackId) {
+                // Between tracks or still loading the host's: the playhead is not comparable yet.
+                continue
+            }
+            val drift = handler.player.currentPosition - session.positionAt(room.position, true)
+            when {
+                // Big gaps belong to the hard seek in applyTransport, not to a rate nudge.
+                abs(drift) > SEEK_TOLERANCE_MS -> Unit
+                abs(drift) > DRIFT_SOFT_MS -> {
+                    if (baseParams == null) baseParams = handler.player.playbackParameters
+                    val base = baseParams ?: GenericPlaybackParameters.DEFAULT
+                    // Positive drift = ahead of the room => slow down; behind => speed up.
+                    val scale = (-drift.toFloat() / SEEK_TOLERANCE_MS).coerceIn(-1f, 1f)
+                    val speed = (base.speed * (1f + scale * DRIFT_NUDGE_MAX))
+                        .coerceIn(base.speed * (1f - DRIFT_NUDGE_MAX), base.speed * (1f + DRIFT_NUDGE_MAX))
+                    if (abs(speed - handler.player.playbackParameters.speed) > 0.001f) {
+                        handler.player.playbackParameters = base.copy(speed = speed)
+                    }
+                }
+                else -> {
+                    baseParams?.let { handler.player.playbackParameters = it }
+                    baseParams = null
+                }
+            }
+        }
     }
 
     /**
@@ -563,6 +619,19 @@ class ListenTogetherPlaybackBridge(
          * more in stutter than it buys in sync; above it the room is audibly apart.
          */
         const val SEEK_TOLERANCE_MS = 750L
+
+        /**
+         * Sub-threshold drift band for the rate nudge (SimpJam). Below this the room is together
+         * for all practical purposes; above it (and below [SEEK_TOLERANCE_MS]) the guest trims its
+         * playback speed instead of waiting for the next hard seek.
+         */
+        const val DRIFT_SOFT_MS = 120L
+
+        /** Sampling period for the drift loop — Metrolist nudges every 250ms. */
+        const val DRIFT_TICK_MS = 250L
+
+        /** Maximum rate trim: ±2%. Closing 500ms takes ~25s at the cap; imperceptible pitch-wise. */
+        const val DRIFT_NUDGE_MAX = 0.02f
 
         /**
          * A jump larger than this is a seek rather than playback advancing. Comfortably above the

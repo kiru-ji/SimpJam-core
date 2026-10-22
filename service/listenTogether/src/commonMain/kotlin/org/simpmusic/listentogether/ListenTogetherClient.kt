@@ -443,14 +443,21 @@ class ListenTogetherClient(
 
         /**
          * How many times a dropped connection is retried before the user is told, in so many words,
-         * that it failed. The delay doubles each time — 1s, 2s, 4s, 8s, 16s — so five attempts span
-         * a little over half a minute of genuinely bad network before giving up rather than
-         * retrying into a flat battery.
+         * that it failed. The delay doubles each time but caps at [MAX_RECONNECT_DELAY], so the
+         * budget spans roughly the server's reconnect-grace window rather than giving up while the
+         * room seat is still held.
          *
-         * Counted attempts, not elapsed time: the budget refills only on a COMPLETED handshake, so
-         * a server that accepts the socket and then goes quiet still exhausts it.
+         * The server keeps a disconnected member's seat for 15 minutes (grace period) before it
+         * reaps the room. The upstream default of five attempts — 1+2+4+8+16 = 31 seconds — spent
+         * that entire window in half a minute, so anyone who dropped for longer than a few seconds
+         * was booted from a room the server was still keeping open for them (a ~29x asymmetry).
+         * Nine attempts cap at 60s: 1+2+4+8+16+32+60+60+60 ≈ 243s ≈ 4 minutes of retries, which
+         * covers the common cases (lift, tunnel, wifi handover, momentary outage) without draining
+         * a flat battery on a genuinely dead server. Counted attempts, not elapsed time: the budget
+         * refills only on a COMPLETED handshake, so a server that accepts the socket and then goes
+         * quiet still exhausts it.
          */
-        private const val MAX_RECONNECT_ATTEMPTS = 5
+        private const val MAX_RECONNECT_ATTEMPTS = 9
 
         /**
          * Errors where reconnecting repeats the same rejection. Everything else the server sends —

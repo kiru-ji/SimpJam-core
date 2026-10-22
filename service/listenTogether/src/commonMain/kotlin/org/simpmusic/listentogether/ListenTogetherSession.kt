@@ -114,6 +114,17 @@ class ListenTogetherSession(
     var autoApproveJoins: Boolean = false
     var autoApproveSuggestions: Boolean = false
 
+    /**
+     * Names the host has blocked, compared case-insensitively. The protocol has no ban and the
+     * server mints a fresh user id per connection, so the name is the only thing that survives a
+     * reconnect — blocking by name is a convenience, not a security control (a blocked guest can
+     * rename). A blocked name is rejected on sight below, so it never reaches the pending-joins
+     * list and, crucially, is never auto-approved when [autoApproveJoins] is on.
+     */
+    var blockedNames: Set<String> = emptySet()
+
+    internal fun isBlocked(name: String): Boolean = blockedNames.any { it.equals(name, ignoreCase = true) }
+
     /** Opens the socket. Joining a room is a separate, later step. */
     fun connect() {
         if (pump == null) {
@@ -354,6 +365,12 @@ class ListenTogetherSession(
 
             MessageTypes.JOIN_REQUEST -> {
                 val p = payload as? JoinRequestPayload ?: return
+                // A blocked name is rejected before the auto-approve path sees it: without this,
+                // turning on auto-approve would silently re-admit anyone the host had blocked.
+                if (isBlocked(p.username)) {
+                    rejectJoin(p.userId)
+                    return
+                }
                 if (autoApproveJoins) {
                     approveJoin(p.userId)
                     return

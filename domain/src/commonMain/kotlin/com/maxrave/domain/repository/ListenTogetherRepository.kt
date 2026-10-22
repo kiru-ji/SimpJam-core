@@ -18,6 +18,13 @@ interface ListenTogetherRepository {
     var autoApproveJoins: Boolean
     var autoApproveSuggestions: Boolean
 
+    /**
+     * Names the host has blocked. The session rejects a join request from any of these before the
+     * auto-approve path can see it, so a blocked guest is never re-admitted. Compared
+     * case-insensitively; a convenience, not a security control (see the session).
+     */
+    var blockedNames: Set<String>
+
     fun connect()
 
     fun disconnect()

@@ -218,8 +218,8 @@ class JvmMediaPlayerHandlerImpl(
             Platform.MacOs
         } else {
             Platform.Linux(
-                "SimpMusic",
-                "com.maxrave.simpmusic",
+                "SimpJam",
+                "dev.kiruji.simpjam",
             )
         }
     }

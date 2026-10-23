@@ -718,12 +718,14 @@ class Ytmusic {
         }
 
     suspend fun checkForGithubReleaseUpdate() =
-        httpClient.get("https://api.github.com/repos/maxrave-dev/SimpMusic/releases/latest") {
+        // SimpJam fork: in-app update checks must point at the fork's releases, otherwise the
+        // app would advertise upstream APKs whose signature cannot install over this one.
+        httpClient.get("https://api.github.com/repos/kiru-ji/SimpJam/releases/latest") {
             contentType(ContentType.Application.Json)
         }
 
     suspend fun checkForFdroidUpdate() =
-        httpClient.get("https://f-droid.org/api/v1/packages/com.maxrave.simpmusic") {
+        httpClient.get("https://f-droid.org/api/v1/packages/dev.kiruji.simpjam") {
             contentType(ContentType.Application.Json)
         }
 
